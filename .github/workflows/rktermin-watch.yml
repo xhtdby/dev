@@ -1,0 +1,82 @@
+name: RK-Termin London slot watch
+
+on:
+  push:
+    paths:
+      - "rktermin_watch.py"
+      - ".github/workflows/rktermin-watch.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: rktermin-london-watch
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check RK-Termin
+        id: check
+        shell: bash
+        run: |
+          set +e
+          python3 rktermin_watch.py | tee /tmp/rktermin-output.txt
+          STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif [ "$STATUS" -eq 1 ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Checker failed; refusing to change alert state."
+            exit "$STATUS"
+          fi
+
+      - name: Alert on an available appointment
+        if: steps.check.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TITLE="🚨 German visa appointment available — London"
+          EXISTING=$(gh issue list --state open --search "in:title German visa appointment available London" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "Alert issue #$EXISTING is already open; not spamming another notification."
+            exit 0
+          fi
+
+          {
+            echo "The RK-Termin checker found at least one bookable day for London realm 1614 / category 4019."
+            echo
+            echo "Detected at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "### Booking links detected"
+            grep '^BOOKING_LINK=' /tmp/rktermin-output.txt | sed 's/^BOOKING_LINK=/- /'
+            echo
+            echo "Original month page:"
+            echo "https://service2.diplo.de/rktermin/extern/appointment_showMonth.do?locationCode=lond&realmId=1614&categoryId=4019&dateStr=20.07.2026"
+            echo
+            echo "Book immediately; slots can disappear quickly."
+          } > /tmp/issue-body.md
+
+          gh issue create --title "$TITLE" --body-file /tmp/issue-body.md --assignee xhtdby
+
+      - name: Reset alert when no appointment is available
+        if: steps.check.outputs.available == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh issue list --state open --search "in:title German visa appointment available London" --json number --jq '.[].number' | while read -r issue; do
+            [ -z "$issue" ] && continue
+            gh issue close "$issue" --comment "The checker no longer sees a bookable day. Closing this alert so a future reappearance can notify again."
+          done
