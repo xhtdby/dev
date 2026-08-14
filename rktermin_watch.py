@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Check German Foreign Office RK-Termin London category 4019 for bookable days."""
+"""Check German Foreign Office RK-Termin London category 4019 for bookable days.
+
+Primary fetch path uses Jina Reader as an HTML-to-text proxy because service2.diplo.de
+currently times out requests from GitHub-hosted runners. If Jina cannot reach the page,
+the script fails closed (no false availability alert).
+"""
 
 from __future__ import annotations
 
@@ -14,8 +19,10 @@ import urllib.request
 LOCATION = "lond"
 REALM = "1614"
 CATEGORY = "4019"
-BASE = "https://service2.diplo.de/rktermin/extern/appointment_showMonth.do"
-TIMEOUT_SECONDS = 12
+DIPLO_HOST = "service2.diplo.de"
+BASE = f"https://{DIPLO_HOST}/rktermin/extern/appointment_showMonth.do"
+JINA_PREFIX = "https://r.jina.ai/https://"
+TIMEOUT_SECONDS = 20
 MONTHS_TO_CHECK = 8
 
 NO_SLOT_PHRASES = (
@@ -46,29 +53,49 @@ def make_month_url(d: dt.date) -> str:
     return BASE + "?" + urllib.parse.urlencode(params)
 
 
-def fetch(url: str) -> str:
+def jina_url(target_url: str) -> str:
+    parsed = urllib.parse.urlsplit(target_url)
+    if parsed.scheme != "https" or parsed.netloc != DIPLO_HOST:
+        raise ValueError("unexpected target URL")
+    return JINA_PREFIX + parsed.netloc + parsed.path + ("?" + parsed.query if parsed.query else "")
+
+
+def fetch_via_jina(target_url: str) -> str:
+    proxy_url = jina_url(target_url)
     req = urllib.request.Request(
-        url,
+        proxy_url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-GB,en;q=0.9,de;q=0.7",
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "text/plain,text/markdown;q=0.9,*/*;q=0.8",
             "Cache-Control": "no-cache",
         },
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as r:
         if r.status != 200:
-            raise RuntimeError(f"HTTP {r.status}")
+            raise RuntimeError(f"Jina HTTP {r.status}")
         return r.read().decode("utf-8", errors="replace")
 
 
 def booking_links(body: str, page_url: str):
     decoded = html.unescape(body)
-    hrefs = re.findall(r'href=["\']([^"\']*appointment_showDay\.do[^"\']*)["\']', decoded, flags=re.I)
+    candidates = []
+
+    # Raw HTML hrefs, if the proxy returns HTML.
+    candidates.extend(
+        re.findall(r'href=["\']([^"\']*appointment_showDay\.do[^"\']*)["\']', decoded, flags=re.I)
+    )
+
+    # Markdown/plain-text URLs, which is Jina Reader's normal output.
+    candidates.extend(
+        re.findall(r'https?://[^\s\)\]>"\']*appointment_showDay\.do[^\s\)\]>"\']*', decoded, flags=re.I)
+    )
+
     out = []
-    for href in hrefs:
+    for href in candidates:
         full = urllib.parse.urljoin(page_url, href)
         parsed = urllib.parse.urlparse(full)
+        if parsed.netloc != DIPLO_HOST:
+            continue
         qs = urllib.parse.parse_qs(parsed.query)
         if qs.get("locationCode", [LOCATION])[0] != LOCATION:
             continue
@@ -82,15 +109,14 @@ def booking_links(body: str, page_url: str):
 
 
 def inspect(url: str):
-    body = fetch(url)
+    body = fetch_via_jina(url)
     links = booking_links(body, url)
     lowered = body.lower()
     no_slot = any(p.lower() in lowered for p in NO_SLOT_PHRASES)
     captcha = "captcha" in lowered
     snippet = ""
     if not links and not no_slot:
-        text = re.sub(r"<[^>]+>", " ", body)
-        snippet = re.sub(r"\s+", " ", html.unescape(text)).strip()[:500]
+        snippet = re.sub(r"\s+", " ", html.unescape(body)).strip()[:700]
     return url, links, no_slot, captcha, len(body), snippet
 
 
@@ -138,8 +164,13 @@ def main() -> int:
             print(f"BOOKING_LINK={link}")
         return 0
 
-    print("AVAILABLE=0")
-    return 1
+    # Only accept a no-slot result when every page contained a known no-slot phrase.
+    if results and all(r[2] for r in results):
+        print("AVAILABLE=0")
+        return 1
+
+    print("CHECK_FAILED=page layout/state was not recognized; refusing to infer availability", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
