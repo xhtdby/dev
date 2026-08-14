@@ -1,0 +1,40 @@
+{
+  "target": {
+    "location_code": "lond",
+    "realm_id": "1614",
+    "category_id": "4019",
+    "months_ahead": 8,
+    "poll_seconds": 30,
+    "start_date": null,
+    "end_date": null
+  },
+  "profile": {
+    "first_name": "YOUR_FIRST_NAME",
+    "last_name": "YOUR_LAST_NAME",
+    "email": "you@example.com",
+    "email_repeat": "you@example.com",
+    "phone": "+44...",
+    "passport_number": "YOUR_PASSPORT_NUMBER",
+    "date_of_birth": "YYYY-MM-DD",
+    "nationality": "India"
+  },
+  "selectors": {
+    "submit": ""
+  },
+  "checkbox_selectors": [],
+  "telegram": {
+    "bot_token": "",
+    "chat_id": "",
+    "allowed_user_id": ""
+  },
+  "proxy": {
+    "server": "",
+    "username": "",
+    "password": ""
+  },
+  "user_data_dir": ".diplo-profile",
+  "headless": true,
+  "navigation_timeout_ms": 45000,
+  "exit_after_booking": true,
+  "screenshot_dir": "screenshots"
+}
