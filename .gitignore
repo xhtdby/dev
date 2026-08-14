@@ -1,0 +1,7 @@
+config.json
+.env
+.diplo-profile/
+screenshots/
+.venv/
+__pycache__/
+*.pyc
