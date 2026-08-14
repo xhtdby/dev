@@ -1,0 +1,15 @@
+services:
+  diplo-bot:
+    build: .
+    restart: unless-stopped
+    init: true
+    shm_size: "1gb"
+    env_file:
+      - .env
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - diplo-browser-profile:/app/.diplo-profile
+      - ./screenshots:/app/screenshots
+
+volumes:
+  diplo-browser-profile:
