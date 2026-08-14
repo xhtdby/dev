@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check German Foreign Office RK-Termin London category 4019 for bookable days."""
 
+# A tiny edit here also triggers the GitHub Actions watcher immediately on push.
 from __future__ import annotations
 
 import datetime as dt
